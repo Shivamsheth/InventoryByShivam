@@ -11,7 +11,7 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="navbar navbar-expand-lg navbar-dark bg-dark px-4 toggle">
+    <nav className="navbar navbar-expand-lg navbar-dark bg-dark px-4 navbar-toggler">
       <Link className="navbar-brand fw-bold" to="/">
         Inventory App
       </Link>
