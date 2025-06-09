@@ -82,6 +82,11 @@ export default function Navbar() {
                   </Link>
                 </li>
                 <li className="nav-item">
+                  <Link to="/inventory" className="nav-link nav-link-hover">
+                    Inventory
+                  </Link>
+                </li>
+                <li className="nav-item">
                   <span
                     className="nav-link nav-link-hover"
                     onClick={handleLogout}

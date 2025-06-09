@@ -1,250 +1,251 @@
-import { useState, useEffect } from 'react';
-import { auth, db } from '../firebase';
+// src/pages/Inventory.jsx
+import React, { useState, useEffect } from 'react';
+import { db, auth } from '../firebase';
 import {
   collection,
   addDoc,
-  onSnapshot,
+  getDocs,
+  doc,
   updateDoc,
   deleteDoc,
-  doc,
   query,
   where,
-  serverTimestamp,
   orderBy,
+  Timestamp
 } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import Papa from 'papaparse';
 import '../styles/styles.css';
 
-export default function Inventory() {
-  const [items, setItems] = useState([]);
-  const [newItem, setNewItem] = useState({ name: '', quantity: 0, price: 0 });
+const Inventory = () => {
+  const [user, setUser] = useState(null);
+  const [inventory, setInventory] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const user = auth.currentUser;
+  const [itemName, setItemName] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [price, setPrice] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
 
   useEffect(() => {
-    if (!user) return;
-
-    const invRef = collection(db, 'inventory');
-    const q = query(invRef, where('userId', '==', user.uid));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const invData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        amount: doc.data().quantity * doc.data().price,
-      }));
-      setItems(invData);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        setUser(u);
+        await loadInventory(u.uid);
+        await loadTransactions(u.uid);
+      }
     });
+    return () => unsubscribe();
+  }, []);
 
-    const txRef = collection(db, 'transactions');
-    const txQuery = query(
-      txRef,
-      where('userId', '==', user.uid),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubTx = onSnapshot(txQuery, (snapshot) => {
-      setTransactions(snapshot.docs.map((doc) => doc.data()));
-    });
+  const loadInventory = async (uid) => {
+    const q = query(collection(db, 'inventory'), where('userId', '==', uid));
+    const snapshot = await getDocs(q);
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setInventory(data);
+  };
 
-    return () => {
-      unsub();
-      unsubTx();
+  const loadTransactions = async (uid) => {
+    const q = query(collection(db, 'transactions'), where('userId', '==', uid), orderBy('timestamp', 'desc'));
+    const snapshot = await getDocs(q);
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setTransactions(data);
+  };
+
+  const addInventoryItem = async () => {
+    if (!itemName || !quantity || !price || !user) return;
+    const total = parseFloat(quantity) * parseFloat(price);
+    const newItem = {
+      name: itemName,
+      quantity: parseInt(quantity),
+      price: parseFloat(price),
+      total,
+      userId: user.uid
     };
-  }, [user]);
 
-  const handleAdd = async () => {
-    if (!newItem.name || newItem.quantity <= 0 || newItem.price <= 0) return;
-    try {
-      const docRef = await addDoc(collection(db, 'inventory'), {
-        ...newItem,
-        userId: user.uid,
-        timestamp: serverTimestamp(),
-      });
+    const docRef = await addDoc(collection(db, 'inventory'), newItem);
+    setInventory(prev => [...prev, { ...newItem, id: docRef.id }]);
+    setItemName('');
+    setQuantity('');
+    setPrice('');
 
-      await addDoc(collection(db, 'transactions'), {
-        userId: user.uid,
-        type: 'Added',
-        item: newItem.name,
-        quantity: newItem.quantity,
-        price: newItem.price,
-        amount: newItem.quantity * newItem.price,
-        timestamp: serverTimestamp(),
-      });
+    await addDoc(collection(db, 'transactions'), {
+      type: 'Added',
+      name: itemName,
+      quantity: parseInt(quantity),
+      price: parseFloat(price),
+      total,
+      timestamp: Timestamp.now(),
+      userId: user.uid
+    });
 
-      setNewItem({ name: '', quantity: 0, price: 0 });
-    } catch (err) {
-      console.error('Add failed:', err);
-    }
+    await loadTransactions(user.uid);
+  };
+
+  const deleteInventoryItem = async (id) => {
+    const item = inventory.find(i => i.id === id);
+    if (!item || !user) return;
+
+    await deleteDoc(doc(db, 'inventory', id));
+    setInventory(prev => prev.filter(i => i.id !== id));
+
+    await addDoc(collection(db, 'transactions'), {
+      type: 'Deleted',
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+      timestamp: Timestamp.now(),
+      userId: user.uid
+    });
+
+    await loadTransactions(user.uid);
+  };
+
+  const handleQuantityChange = (id, delta) => {
+    setInventory(prev =>
+      prev.map(item =>
+        item.id === id
+          ? {
+              ...item,
+              quantity: Math.max(0, item.quantity + delta),
+              total: (item.quantity + delta) * item.price
+            }
+          : item
+      )
+    );
   };
 
   const handleSave = async (item) => {
-    try {
-      const ref = doc(db, 'inventory', item.id);
-      await updateDoc(ref, {
-        quantity: item.quantity,
-        price: item.price,
-      });
+    if (!user) return;
+    const itemRef = doc(db, 'inventory', item.id);
+    await updateDoc(itemRef, {
+      quantity: item.quantity,
+      total: item.total
+    });
 
-      await addDoc(collection(db, 'transactions'), {
-        userId: user.uid,
-        type: 'Updated',
-        item: item.name,
-        quantity: item.quantity,
-        price: item.price,
-        amount: item.quantity * item.price,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.error('Save failed:', err);
-    }
+    await addDoc(collection(db, 'transactions'), {
+      type: 'Updated',
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+      timestamp: Timestamp.now(),
+      userId: user.uid
+    });
+
+    await loadTransactions(user.uid);
   };
 
-  const handleDelete = async (item) => {
-    try {
-      await deleteDoc(doc(db, 'inventory', item.id));
-
-      await addDoc(collection(db, 'transactions'), {
-        userId: user.uid,
-        type: 'Deleted',
-        item: item.name,
-        quantity: item.quantity,
-        price: item.price,
-        amount: item.quantity * item.price,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.error('Delete failed:', err);
-    }
+  const exportToCSV = () => {
+    const csv = Papa.unparse(transactions.map(({ id, ...rest }) => rest));
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `transactions_${new Date().toISOString()}.csv`;
+    link.click();
   };
 
-  const totalAmount = items.reduce((acc, item) => acc + item.quantity * item.price, 0);
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    autoTable(doc, {
+      head: [['Type', 'Item', 'Qty', 'Price', 'Total', 'Date']],
+      body: transactions.map(tx => [
+        tx.type,
+        tx.name,
+        tx.quantity,
+        tx.price,
+        tx.total,
+        tx.timestamp.toDate().toLocaleString()
+      ])
+    });
+    doc.save(`transactions_${new Date().toISOString()}.pdf`);
+  };
+
+  const filteredTransactions = transactions.filter(tx =>
+    Object.values(tx).some(value =>
+      String(value).toLowerCase().includes(searchTerm.toLowerCase())
+    )
+  );
+
+  const paginatedTransactions = filteredTransactions.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
 
   return (
     <div className="page-container">
-      <h1 className="display-4 fw-bold mb-3 gradient-text">
-        <span className="text-primary">Inventory</span> Management
-      </h1>
+      <div className="glass-card mb-4">
+        <h2>Inventory</h2>
+        <div className="d-flex mb-3">
+          <input className="form-control me-2" placeholder="Item name" value={itemName} onChange={e => setItemName(e.target.value)} />
+          <input className="form-control me-2" type="number" placeholder="Quantity" value={quantity} onChange={e => setQuantity(e.target.value)} />
+          <input className="form-control me-2" type="number" placeholder="Price" value={price} onChange={e => setPrice(e.target.value)} />
+          <button className="btn btn-gradient" onClick={addInventoryItem}>Add</button>
+        </div>
 
-      <div className="auth-card">
-        <h3>Add New Product</h3>
-        <input
-          type="text"
-          placeholder="Product Name"
-          className="form-control"
-          value={newItem.name}
-          onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-        />
-        <input
-          type="number"
-          placeholder="Quantity"
-          className="form-control"
-          value={newItem.quantity}
-          onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })}
-        />
-        <input
-          type="number"
-          placeholder="Price"
-          className="form-control"
-          value={newItem.price}
-          onChange={(e) => setNewItem({ ...newItem, price: Number(e.target.value) })}
-        />
-        <button className="btn btn-gradient mt-2 w-100" onClick={handleAdd}>
-          Add Product
-        </button>
-      </div>
-
-      <h3 className="mt-4">Your Products</h3>
-      {items.length === 0 ? (
-        <p>No items yet.</p>
-      ) : (
-        <table className="table table-dark table-hover mt-3">
+        <table className="table text-white table-bordered table-hover">
           <thead>
-            <tr>
-              <th>Name</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Amount</th>
-              <th>Actions</th>
-            </tr>
+            <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th><th>Actions</th></tr>
           </thead>
           <tbody>
-            {items.map((item, i) => (
+            {inventory.map(item => (
               <tr key={item.id}>
                 <td>{item.name}</td>
                 <td>
-                  <input
-                    type="number"
-                    value={item.quantity}
-                    onChange={(e) =>
-                      setItems((prev) =>
-                        prev.map((itm, idx) =>
-                          idx === i ? { ...itm, quantity: Number(e.target.value) } : itm
-                        )
-                      )
-                    }
-                    className="form-control"
-                  />
+                  <button onClick={() => handleQuantityChange(item.id, -1)}>-</button>
+                  <span className="mx-2">{item.quantity}</span>
+                  <button onClick={() => handleQuantityChange(item.id, 1)}>+</button>
                 </td>
+                <td><strong>{item.price}</strong></td>
+                <td>{item.total}</td>
                 <td>
-                  <input
-                    type="number"
-                    value={item.price}
-                    onChange={(e) =>
-                      setItems((prev) =>
-                        prev.map((itm, idx) =>
-                          idx === i ? { ...itm, price: Number(e.target.value) } : itm
-                        )
-                      )
-                    }
-                    className="form-control"
-                  />
-                </td>
-                <td>₹{item.quantity * item.price}</td>
-                <td>
-                  <button
-                    className="btn btn-sm btn-outline-success me-2"
-                    onClick={() => handleSave(item)}
-                  >
-                    Save
-                  </button>
-                  <button
-                    className="btn btn-sm btn-outline-danger"
-                    onClick={() => handleDelete(item)}
-                  >
-                    Delete
-                  </button>
+                  <button className="btn btn-outline-secondary" onClick={() => handleSave(item)}>Save</button>
+                  <button className="btn btn-outline-secondary ms-2" onClick={() => deleteInventoryItem(item.id)}>Delete</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
+      </div>
 
-      <h4 className="mt-4">Total Inventory Value: ₹{totalAmount}</h4>
-
-      <h3 className="mt-5">Transaction History</h3>
-      <table className="table table-striped table-bordered mt-2">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Item</th>
-            <th>Qty</th>
-            <th>Price</th>
-            <th>Amount</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          {transactions.map((tx, i) => (
-            <tr key={i}>
-              <td>{tx.type}</td>
-              <td>{tx.item}</td>
-              <td>{tx.quantity}</td>
-              <td>{tx.price}</td>
-              <td>₹{tx.amount}</td>
-              <td>{tx.timestamp?.toDate().toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="glass-card mb-4">
+        <h2>Transaction History</h2>
+        <input className="form-control mb-2" placeholder="Search transactions" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        <div className="mb-3">
+          <button className="btn btn-gradient me-2" onClick={exportToCSV}>Export CSV</button>
+          <button className="btn btn-gradient" onClick={exportToPDF}>Export PDF</button>
+        </div>
+        <table className="table text-white table-bordered">
+          <thead>
+            <tr><th>Type</th><th>Item</th><th>Qty</th><th>Price</th><th>Total</th><th>Date</th></tr>
+          </thead>
+          <tbody>
+            {paginatedTransactions.map(tx => (
+              <tr key={tx.id}>
+                <td>{tx.type}</td>
+                <td>{tx.name}</td>
+                <td>{tx.quantity}</td>
+                <td>{tx.price}</td>
+                <td>{tx.total}</td>
+                <td>{tx.timestamp.toDate().toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="d-flex justify-content-between mt-3">
+          <button className="btn btn-outline-secondary" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>Prev</button>
+          <span className="text-muted">Page {currentPage} of {totalPages}</span>
+          <button className="btn btn-outline-secondary" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>Next</button>
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default Inventory;

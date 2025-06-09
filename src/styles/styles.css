@@ -71,7 +71,6 @@ a {
   text-shadow: 0 0 8px rgba(0, 212, 255, 0.7);
 }
 
-/* ==== NAVBAR BUTTON === */
 .navbar .btn {
   margin-left: 1rem;
 }
@@ -120,7 +119,7 @@ a {
   animation: fadeIn 0.4s ease-in-out;
   color: #fff;
   max-width: 600px;
-  width : 100%;
+  width: 100%;
 }
 
 .glass-card {
