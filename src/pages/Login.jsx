@@ -1,30 +1,31 @@
 import { useState } from 'react';
-import axios from 'axios';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../firebase'; // Make sure this path is correct
 import { useNavigate } from 'react-router-dom';
 import '../styles/styles.css';
 
 export default function Login() {
     const navigate = useNavigate();
-    const [form, setForm] = useState({ username: '', password: '' });
+    const [form, setForm] = useState({ email: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
 
     const handleLogin = async () => {
         try {
-            const res = await axios.post('http://localhost:5000/api/auth/login', form);
-            localStorage.setItem('token', res.data.token);
+            await signInWithEmailAndPassword(auth, form.email, form.password);
             navigate('/inventory');
         } catch (err) {
-            setError('Invalid username or password');
+            setError('Invalid email or password');
         }
     };
 
     return (
-        
-            <div className="page-container">
-                  <h1 className="display-4 fw-bold mb-3 gradient-text">Welcome to <span className="text-primary">Pro-Inventory</span></h1>
+        <div className="page-container">
+            <h1 className="display-4 fw-bold mb-3 gradient-text">
+                Welcome to <span className="text-primary">Pro-Inventory</span>
+            </h1>
 
-            <div className="auth-card" >
+            <div className="auth-card">
                 <h2 className="mb-4 text-center">Login</h2>
 
                 {error && (
@@ -32,11 +33,11 @@ export default function Login() {
                 )}
 
                 <input
-                    type="text"
+                    type="email"
                     className="form-control"
-                    placeholder="Username"
-                    value={form.username}
-                    onChange={(e) => setForm({ ...form, username: e.target.value })}
+                    placeholder="Email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
                 />
 
                 <input
@@ -64,7 +65,5 @@ export default function Login() {
                 </button>
             </div>
         </div>
-       
-        
     );
 }

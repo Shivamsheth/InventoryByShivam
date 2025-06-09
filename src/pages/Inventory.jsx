@@ -1,229 +1,250 @@
-import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import Papa from 'papaparse';
+import { useState, useEffect } from 'react';
+import { auth, db } from '../firebase';
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  serverTimestamp,
+  orderBy,
+} from 'firebase/firestore';
 import '../styles/styles.css';
 
 export default function Inventory() {
   const [items, setItems] = useState([]);
+  const [newItem, setNewItem] = useState({ name: '', quantity: 0, price: 0 });
   const [transactions, setTransactions] = useState([]);
-  const [form, setForm] = useState({ name: '', quantity: '', category: '', price: '' });
-  const [currentPage, setCurrentPage] = useState(1);
-  const navigate = useNavigate();
-
-  const itemsPerPage = 25;
+  const user = auth.currentUser;
 
   useEffect(() => {
-    if (!localStorage.getItem('token')) navigate('/login');
-  }, [navigate]);
+    if (!user) return;
 
-  useEffect(() => {
-    const stored = localStorage.getItem('transactions');
-    if (stored) setTransactions(JSON.parse(stored));
-  }, []);
-
-  const fetchData = async () => {
-    const token = localStorage.getItem('token');
-    const res = await axios.get('http://localhost:5000/api/inventory', {
-      headers: { Authorization: `Bearer ${token}` },
+    const invRef = collection(db, 'inventory');
+    const q = query(invRef, where('userId', '==', user.uid));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const invData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        amount: doc.data().quantity * doc.data().price,
+      }));
+      setItems(invData);
     });
-    const processed = res.data.map((item) => ({
-      ...item,
-      quantity: parseInt(item.quantity || 0),
-      price: parseFloat(item.price || 0),
-      saved: true,
-    }));
-    setItems(processed);
-  };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+    const txRef = collection(db, 'transactions');
+    const txQuery = query(
+      txRef,
+      where('userId', '==', user.uid),
+      orderBy('timestamp', 'desc')
+    );
+    const unsubTx = onSnapshot(txQuery, (snapshot) => {
+      setTransactions(snapshot.docs.map((doc) => doc.data()));
+    });
+
+    return () => {
+      unsub();
+      unsubTx();
+    };
+  }, [user]);
 
   const handleAdd = async () => {
-    const { name, quantity, category, price } = form;
-    const qty = parseInt(quantity);
-    const prc = parseFloat(price);
-    if (!name || !category || isNaN(qty) || isNaN(prc)) return;
+    if (!newItem.name || newItem.quantity <= 0 || newItem.price <= 0) return;
+    try {
+      const docRef = await addDoc(collection(db, 'inventory'), {
+        ...newItem,
+        userId: user.uid,
+        timestamp: serverTimestamp(),
+      });
 
-    const token = localStorage.getItem('token');
-    await axios.post('http://localhost:5000/api/inventory', { name, quantity: qty, category, price: prc }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setForm({ name: '', quantity: '', category: '', price: '' });
-    fetchData();
-  };
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        type: 'Added',
+        item: newItem.name,
+        quantity: newItem.quantity,
+        price: newItem.price,
+        amount: newItem.quantity * newItem.price,
+        timestamp: serverTimestamp(),
+      });
 
-  const handleChange = (id, field, value) => {
-    setItems((prev) =>
-      prev.map((item) => (item._id === id ? { ...item, [field]: value, saved: false } : item))
-    );
+      setNewItem({ name: '', quantity: 0, price: 0 });
+    } catch (err) {
+      console.error('Add failed:', err);
+    }
   };
 
   const handleSave = async (item) => {
-    const { _id, name, quantity, price, category } = item;
-    const token = localStorage.getItem('token');
-    await axios.put(`http://localhost:5000/api/inventory/${_id}`, { name, quantity, price, category }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setItems((prev) => prev.map((i) => (i._id === _id ? { ...i, saved: true } : i)));
+    try {
+      const ref = doc(db, 'inventory', item.id);
+      await updateDoc(ref, {
+        quantity: item.quantity,
+        price: item.price,
+      });
 
-    const newTransaction = {
-      timestamp: new Date().toLocaleString(),
-      name,
-      quantity,
-      price,
-      total: quantity * price,
-      action: 'Save'
-    };
-    const updated = [...transactions, newTransaction];
-    setTransactions(updated);
-    localStorage.setItem('transactions', JSON.stringify(updated));
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        type: 'Updated',
+        item: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        amount: item.quantity * item.price,
+        timestamp: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error('Save failed:', err);
+    }
   };
 
-  const handleDelete = async (id, item) => {
-    const token = localStorage.getItem('token');
-    await axios.delete(`http://localhost:5000/api/inventory/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    fetchData();
-    const newTransaction = {
-      timestamp: new Date().toLocaleString(),
-      name: item.name,
-      quantity: item.quantity,
-      price: item.price,
-      total: 0,
-      action: 'Delete'
-    };
-    const updated = [...transactions, newTransaction];
-    setTransactions(updated);
-    localStorage.setItem('transactions', JSON.stringify(updated));
+  const handleDelete = async (item) => {
+    try {
+      await deleteDoc(doc(db, 'inventory', item.id));
+
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        type: 'Deleted',
+        item: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        amount: item.quantity * item.price,
+        timestamp: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
   };
 
-  const exportCSV = () => {
-    const csv = Papa.unparse(transactions);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `transactions_${Date.now()}.csv`;
-    link.click();
-  };
-
-  const exportPDF = () => {
-    const doc = new jsPDF();
-    doc.text("Transaction Report", 14, 10);
-    autoTable(doc, {
-      head: [['Timestamp', 'Name', 'Quantity', 'Price', 'Total', 'Action']],
-      body: transactions.map(t => [t.timestamp, t.name, t.quantity, t.price, t.total, t.action]),
-      startY: 20
-    });
-    doc.save(`transactions_${Date.now()}.pdf`);
-  };
-
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-  const recentTransactions = transactions.filter((t) => new Date(t.timestamp) >= oneYearAgo);
-  const indexOfLast = currentPage * itemsPerPage;
-  const indexOfFirst = indexOfLast - itemsPerPage;
-  const paginatedTransactions = recentTransactions.slice(indexOfFirst, indexOfLast);
-  const totalPages = Math.ceil(recentTransactions.length / itemsPerPage);
-
-  const totalValue = items.reduce((sum, item) => (item.saved ? sum + item.quantity * item.price : sum), 0);
+  const totalAmount = items.reduce((acc, item) => acc + item.quantity * item.price, 0);
 
   return (
     <div className="page-container">
-      <div className="glass-card">
-        <h2 className="mb-4 text-center">Inventory Management</h2>
+      <h1 className="display-4 fw-bold mb-3 gradient-text">
+        <span className="text-primary">Inventory</span> Management
+      </h1>
 
-        <div className="row g-3 mb-4">
-          <input type="text" className="form-control" placeholder="Item Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input type="number" className="form-control" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
-          <input type="text" className="form-control" placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
-          <input type="number" className="form-control" placeholder="Price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-          <button className="btn btn-primary" onClick={handleAdd}>Add</button>
-        </div>
+      <div className="auth-card">
+        <h3>Add New Product</h3>
+        <input
+          type="text"
+          placeholder="Product Name"
+          className="form-control"
+          value={newItem.name}
+          onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+        />
+        <input
+          type="number"
+          placeholder="Quantity"
+          className="form-control"
+          value={newItem.quantity}
+          onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })}
+        />
+        <input
+          type="number"
+          placeholder="Price"
+          className="form-control"
+          value={newItem.price}
+          onChange={(e) => setNewItem({ ...newItem, price: Number(e.target.value) })}
+        />
+        <button className="btn btn-gradient mt-2 w-100" onClick={handleAdd}>
+          Add Product
+        </button>
+      </div>
 
-        <table className="table table-dark table-bordered">
+      <h3 className="mt-4">Your Products</h3>
+      {items.length === 0 ? (
+        <p>No items yet.</p>
+      ) : (
+        <table className="table table-dark table-hover mt-3">
           <thead>
             <tr>
               <th>Name</th>
-              <th>Category</th>
+              <th>Qty</th>
               <th>Price</th>
-              <th>Quantity</th>
-              <th>Total</th>
-              <th>Action</th>
+              <th>Amount</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item._id}>
+            {items.map((item, i) => (
+              <tr key={item.id}>
                 <td>{item.name}</td>
-                <td>{item.category}</td>
                 <td>
-                  <input type="number" className="form-control" value={item.price} onChange={(e) => handleChange(item._id, 'price', parseFloat(e.target.value))} />
+                  <input
+                    type="number"
+                    value={item.quantity}
+                    onChange={(e) =>
+                      setItems((prev) =>
+                        prev.map((itm, idx) =>
+                          idx === i ? { ...itm, quantity: Number(e.target.value) } : itm
+                        )
+                      )
+                    }
+                    className="form-control"
+                  />
                 </td>
                 <td>
-                  <button onClick={() => handleChange(item._id, 'quantity', item.quantity - 1)}>-</button>
-                  <span className="mx-2">{item.quantity}</span>
-                  <button onClick={() => handleChange(item._id, 'quantity', item.quantity + 1)}>+</button>
+                  <input
+                    type="number"
+                    value={item.price}
+                    onChange={(e) =>
+                      setItems((prev) =>
+                        prev.map((itm, idx) =>
+                          idx === i ? { ...itm, price: Number(e.target.value) } : itm
+                        )
+                      )
+                    }
+                    className="form-control"
+                  />
                 </td>
-                <td>₹{(item.price * item.quantity).toFixed(2)}</td>
+                <td>₹{item.quantity * item.price}</td>
                 <td>
-                  {!item.saved && item.quantity > 0 && (
-                    <button onClick={() => handleSave(item)} className="btn btn-sm btn-primary">Save</button>
-                  )}
-                  <button onClick={() => handleDelete(item._id, item)} className="btn btn-sm btn-danger ms-2">Delete</button>
+                  <button
+                    className="btn btn-sm btn-outline-success me-2"
+                    onClick={() => handleSave(item)}
+                  >
+                    Save
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline-danger"
+                    onClick={() => handleDelete(item)}
+                  >
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
 
-        <h5>Total Inventory Value: ₹{totalValue.toFixed(2)}</h5>
+      <h4 className="mt-4">Total Inventory Value: ₹{totalAmount}</h4>
 
-        <div className="mt-5">
-          <h4>Transaction History</h4>
-          <table className="table table-dark table-bordered">
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Name</th>
-                <th>Quantity</th>
-                <th>Price</th>
-                <th>Total</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedTransactions.map((t, idx) => (
-                <tr key={idx}>
-                  <td>{t.timestamp}</td>
-                  <td>{t.name}</td>
-                  <td>{t.quantity}</td>
-                  <td>{t.price}</td>
-                  <td>{t.total}</td>
-                  <td>{t.action}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="pagination mt-3">
-            {Array.from({ length: totalPages }, (_, i) => (
-              <button key={i} className={`btn btn-sm ${currentPage === i + 1 ? 'btn-primary' : 'btn-secondary'} mx-1`} onClick={() => setCurrentPage(i + 1)}>
-                {i + 1}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-3">
-            <button onClick={exportCSV} className="btn btn-outline-light me-2">Export CSV</button>
-            <button onClick={exportPDF} className="btn btn-outline-light">Export PDF</button>
-          </div>
-        </div>
-      </div>
+      <h3 className="mt-5">Transaction History</h3>
+      <table className="table table-striped table-bordered mt-2">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Item</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Amount</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {transactions.map((tx, i) => (
+            <tr key={i}>
+              <td>{tx.type}</td>
+              <td>{tx.item}</td>
+              <td>{tx.quantity}</td>
+              <td>{tx.price}</td>
+              <td>₹{tx.amount}</td>
+              <td>{tx.timestamp?.toDate().toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

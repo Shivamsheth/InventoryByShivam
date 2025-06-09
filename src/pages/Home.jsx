@@ -27,7 +27,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="home-container container page-wrapper text-center text-light py-5">
+    <div className="home-container container page-wrapper  text-light py-5">
       <h1 className="display-4 fw-bold mb-3 gradient-text">Welcome to <span className="text-primary">Pro-Inventory</span></h1>
 
       <p className="lead mb-4">

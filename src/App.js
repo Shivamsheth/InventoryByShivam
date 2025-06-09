@@ -25,7 +25,7 @@ const App = () => {
         } />
       </Routes>
 
-      {/* Toast container (if used) */}
+      {/* Toast container (optional usage - if you're using Bootstrap toast notifications) */}
       <div className="position-fixed bottom-0 end-0 p-3" style={{ zIndex: 9999 }}>
         <div id="toast" className="toast align-items-center text-white bg-success border-0" role="alert">
           <div className="d-flex">
