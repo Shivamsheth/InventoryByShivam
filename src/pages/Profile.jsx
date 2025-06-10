@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
-import { auth, db, storage } from '../firebase';
+import { auth, db } from '../firebase';
 import {
   doc,
   getDoc,
   updateDoc,
   deleteDoc,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useNavigate } from 'react-router-dom';
+import { onAuthStateChanged } from 'firebase/auth';
 import '../styles/styles.css';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const user = auth.currentUser;
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     firstName: '',
@@ -20,11 +20,23 @@ export default function Profile() {
     phone: '',
     email: '',
     business: '',
-    profilePic: '',
   });
-  const [newPic, setNewPic] = useState(null);
   const [error, setError] = useState('');
+  const [editMode, setEditMode] = useState(false);
 
+  // Check authentication
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+      } else {
+        navigate('/login');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Load profile data
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -49,24 +61,10 @@ export default function Profile() {
     try {
       const docRef = doc(db, 'users', user.uid);
       await updateDoc(docRef, form);
+      setEditMode(false);
       alert('Profile updated successfully');
     } catch (err) {
       setError('Failed to update profile.');
-    }
-  };
-
-  const handlePicUpload = async () => {
-    if (!newPic) return;
-    const picRef = ref(storage, `profilePictures/${user.uid}`);
-    try {
-      await uploadBytes(picRef, newPic);
-      const url = await getDownloadURL(picRef);
-      setForm({ ...form, profilePic: url });
-      const docRef = doc(db, 'users', user.uid);
-      await updateDoc(docRef, { profilePic: url });
-      alert('Profile picture updated');
-    } catch (err) {
-      setError('Failed to upload picture.');
     }
   };
 
@@ -84,80 +82,89 @@ export default function Profile() {
   };
 
   if (loading) return <div className="text-center mt-5">Loading...</div>;
+  if (!user) return <div className="text-center mt-5">Redirecting...</div>;
 
   return (
     <div className="page-container">
-      <h1 className="display-4 fw-bold mb-3 gradient-text">Your <span className="text-primary">Profile</span></h1>
+      <h1 className="display-4 fw-bold mb-4 gradient-text text-center">Your <span className="text-primary">Profile</span></h1>
 
-      <div className="auth-card">
+      <div className="profile-card p-4 shadow-lg rounded-4 bg-dark text-white mx-auto" style={{ maxWidth: '600px' }}>
         {error && <div className="alert alert-danger">{error}</div>}
 
-        <input
-          type="text"
-          className="form-control"
-          placeholder="First Name"
-          value={form.firstName}
-          onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-        />
-
-        <input
-          type="text"
-          className="form-control"
-          placeholder="Last Name"
-          value={form.lastName}
-          onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-        />
-
-        <input
-          type="tel"
-          className="form-control"
-          placeholder="Phone"
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-        />
-
-        <input
-          type="email"
-          className="form-control"
-          placeholder="Email"
-          value={form.email}
-          readOnly
-        />
-
-        <input
-          type="text"
-          className="form-control"
-          placeholder="Business"
-          value={form.business}
-          onChange={(e) => setForm({ ...form, business: e.target.value })}
-        />
-
-        <div className="mt-3 mb-2">
-          <input type="file" onChange={(e) => setNewPic(e.target.files[0])} />
-          <button className="btn btn-sm btn-outline-primary mt-2" onClick={handlePicUpload}>
-            Upload Profile Picture
-          </button>
+        <div className="mb-3">
+          <label className="form-label">First Name</label>
+          {editMode ? (
+            <input
+              type="text"
+              className="form-control"
+              value={form.firstName}
+              onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+            />
+          ) : (
+            <div className="form-control-plaintext text-light">{form.firstName}</div>
+          )}
         </div>
 
-        {form.profilePic && (
-          <div className="text-center my-2">
-            <img
-              src={form.profilePic}
-              alt="Profile"
-              className="rounded-circle"
-              width={100}
-              height={100}
+        <div className="mb-3">
+          <label className="form-label">Last Name</label>
+          {editMode ? (
+            <input
+              type="text"
+              className="form-control"
+              value={form.lastName}
+              onChange={(e) => setForm({ ...form, lastName: e.target.value })}
             />
-          </div>
-        )}
+          ) : (
+            <div className="form-control-plaintext text-light">{form.lastName}</div>
+          )}
+        </div>
 
-        <button className="btn btn-gradient w-100 mt-3" onClick={handleUpdate}>
-          Update Profile
-        </button>
+        <div className="mb-3">
+          <label className="form-label">Phone</label>
+          {editMode ? (
+            <input
+              type="tel"
+              className="form-control"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            />
+          ) : (
+            <div className="form-control-plaintext text-light">{form.phone}</div>
+          )}
+        </div>
 
-        <button className="btn btn-danger w-100 mt-2" onClick={handleDelete}>
-          Delete Account
-        </button>
+        <div className="mb-3">
+          <label className="form-label">Email</label>
+          <div className="form-control-plaintext text-light">{form.email}</div>
+        </div>
+
+        <div className="mb-3">
+          <label className="form-label">Business</label>
+          {editMode ? (
+            <input
+              type="text"
+              className="form-control"
+              value={form.business}
+              onChange={(e) => setForm({ ...form, business: e.target.value })}
+            />
+          ) : (
+            <div className="form-control-plaintext text-light">{form.business}</div>
+          )}
+        </div>
+
+        <div className="d-flex justify-content-between mt-4">
+          {editMode ? (
+            <>
+              <button className="btn btn-success w-50 me-2" onClick={handleUpdate}>Save Changes</button>
+              <button className="btn btn-secondary w-50" onClick={() => setEditMode(false)}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-primary w-50 me-2" onClick={() => setEditMode(true)}>Edit Profile</button>
+              <button className="btn btn-danger w-50" onClick={handleDelete}>Delete Account</button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
