@@ -23,8 +23,8 @@ export default function Profile() {
   });
   const [error, setError] = useState('');
   const [editMode, setEditMode] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  // Check authentication
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -36,7 +36,6 @@ export default function Profile() {
     return () => unsubscribe();
   }, []);
 
-  // Load profile data
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -48,7 +47,6 @@ export default function Profile() {
           }
         }
       } catch (err) {
-        console.error(err);
         setError('Failed to load profile.');
       } finally {
         setLoading(false);
@@ -62,110 +60,92 @@ export default function Profile() {
       const docRef = doc(db, 'users', user.uid);
       await updateDoc(docRef, form);
       setEditMode(false);
-      alert('Profile updated successfully');
-    } catch (err) {
+      setError('');
+      showToast('Profile updated successfully!');
+    } catch {
       setError('Failed to update profile.');
     }
   };
 
   const handleDelete = async () => {
-    const confirmDelete = window.confirm('Are you sure you want to delete your account? This cannot be undone.');
-    if (!confirmDelete) return;
-
     try {
       await deleteDoc(doc(db, 'users', user.uid));
       await user.delete();
       navigate('/register');
-    } catch (err) {
+    } catch {
       setError('Failed to delete account.');
     }
   };
 
-  if (loading) return <div className="text-center mt-5">Loading...</div>;
-  if (!user) return <div className="text-center mt-5">Redirecting...</div>;
+  const showToast = (msg) => {
+    const toast = document.createElement('div');
+    toast.className = 'toast-success';
+    toast.innerText = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  };
+
+  if (loading) return <div className="text-center mt-5 text-info">Loading...</div>;
+  if (!user) return <div className="text-center mt-5 text-info">Redirecting...</div>;
 
   return (
-    <div className="page-container">
-      <h1 className="display-4 fw-bold mb-4 gradient-text text-center">Your <span className="text-primary">Profile</span></h1>
-
-      <div className="profile-card p-4 shadow-lg rounded-4 bg-dark text-white mx-auto" style={{ maxWidth: '600px' }}>
-        {error && <div className="alert alert-danger">{error}</div>}
-
-        <div className="mb-3">
-          <label className="form-label">First Name</label>
-          {editMode ? (
-            <input
-              type="text"
-              className="form-control"
-              value={form.firstName}
-              onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-            />
-          ) : (
-            <div className="form-control-plaintext text-light">{form.firstName}</div>
-          )}
+    <div className="profile-container">
+      <div className="profile-glass-card">
+        <div className="profile-header">
+          <div className="avatar-circle">
+            <span>{form.firstName.charAt(0)}{form.lastName.charAt(0)}</span>
+          </div>
+          <h2 className="gradient-text">Welcome, {form.firstName}</h2>
         </div>
 
-        <div className="mb-3">
-          <label className="form-label">Last Name</label>
-          {editMode ? (
-            <input
-              type="text"
-              className="form-control"
-              value={form.lastName}
-              onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-            />
-          ) : (
-            <div className="form-control-plaintext text-light">{form.lastName}</div>
-          )}
-        </div>
+        <div className="profile-body">
+          <div className="info-section">
+            {['firstName', 'lastName', 'phone', 'email', 'business'].map((field) => (
+              <div className="info-field" key={field}>
+                <label>{field.charAt(0).toUpperCase() + field.slice(1)}</label>
+                {editMode && field !== 'email' ? (
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={form[field]}
+                    onChange={(e) => setForm({ ...form, [field]: e.target.value })}
+                  />
+                ) : (
+                  <p className="field-value">{form[field]}</p>
+                )}
+              </div>
+            ))}
+          </div>
 
-        <div className="mb-3">
-          <label className="form-label">Phone</label>
-          {editMode ? (
-            <input
-              type="tel"
-              className="form-control"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
-          ) : (
-            <div className="form-control-plaintext text-light">{form.phone}</div>
-          )}
-        </div>
-
-        <div className="mb-3">
-          <label className="form-label">Email</label>
-          <div className="form-control-plaintext text-light">{form.email}</div>
-        </div>
-
-        <div className="mb-3">
-          <label className="form-label">Business</label>
-          {editMode ? (
-            <input
-              type="text"
-              className="form-control"
-              value={form.business}
-              onChange={(e) => setForm({ ...form, business: e.target.value })}
-            />
-          ) : (
-            <div className="form-control-plaintext text-light">{form.business}</div>
-          )}
-        </div>
-
-        <div className="d-flex justify-content-between mt-4">
-          {editMode ? (
-            <>
-              <button className="btn btn-success w-50 me-2" onClick={handleUpdate}>Save Changes</button>
-              <button className="btn btn-secondary w-50" onClick={() => setEditMode(false)}>Cancel</button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-primary w-50 me-2" onClick={() => setEditMode(true)}>Edit Profile</button>
-              <button className="btn btn-danger w-50" onClick={handleDelete}>Delete Account</button>
-            </>
-          )}
+          <div className="action-section">
+            {editMode ? (
+              <>
+                <button className="btn btn-success" onClick={handleUpdate}>Save</button>
+                <button className="btn btn-outline-light" onClick={() => setEditMode(false)}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-gradient" onClick={() => setEditMode(true)}>Edit</button>
+                <button className="btn btn-danger" onClick={() => setShowDeleteModal(true)}>Delete</button>
+              </>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Delete Modal */}
+      {showDeleteModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h4>Are you sure you want to delete your account?</h4>
+            <p>This action is permanent and cannot be undone.</p>
+            <div className="d-flex justify-content-between mt-3">
+              <button className="btn btn-danger" onClick={handleDelete}>Yes, Delete</button>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

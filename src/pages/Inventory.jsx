@@ -200,7 +200,7 @@ const Inventory = () => {
             <strong>Total: ₹{computedTotal()}</strong>
           </div>
         )}
-        <table className="table text-white table-bordered table-hover">
+        <table className="table text-white table-bordered table-hover table-dark">
           <thead>
             <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th><th>Actions</th></tr>
           </thead>
@@ -232,7 +232,7 @@ const Inventory = () => {
           <button className="btn btn-gradient me-2" onClick={exportToCSV}>Export CSV</button>
           <button className="btn btn-gradient" onClick={exportToPDF}>Export PDF</button>
         </div>
-        <table className="table text-white table-bordered">
+        <table className="table text-white table-bordered table-dark">
           <thead>
             <tr><th>Type</th><th>Item</th><th>Qty</th><th>Price</th><th>Total</th><th>Date</th></tr>
           </thead>
