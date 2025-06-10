@@ -9,7 +9,6 @@ import {
   updateDoc,
   deleteDoc,
   query,
-  where,
   orderBy,
   Timestamp
 } from 'firebase/firestore';
@@ -36,50 +35,53 @@ const Inventory = () => {
         setUser(u);
         await loadInventory(u.uid);
         await loadTransactions(u.uid);
+      } else {
+        window.location.href = '/login'; // Redirect to login if not logged in
       }
     });
     return () => unsubscribe();
   }, []);
 
   const loadInventory = async (uid) => {
-    const q = query(collection(db, 'inventory'), where('userId', '==', uid));
+    const q = query(collection(db, 'inventories', uid, 'items'));
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     setInventory(data);
   };
 
   const loadTransactions = async (uid) => {
-    const q = query(collection(db, 'transactions'), where('userId', '==', uid), orderBy('timestamp', 'desc'));
+    const q = query(collection(db, 'inventories', uid, 'transactions'), orderBy('timestamp', 'desc'));
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     setTransactions(data);
   };
 
   const addInventoryItem = async () => {
-    if (!itemName || !quantity || !price || !user) return;
-    const total = parseFloat(quantity) * parseFloat(price);
+    const qty = parseInt(quantity);
+    const prc = parseFloat(price);
+    if (!itemName || isNaN(qty) || isNaN(prc) || qty <= 0 || prc <= 0 || !user) return;
+
+    const total = qty * prc;
     const newItem = {
       name: itemName,
-      quantity: parseInt(quantity),
-      price: parseFloat(price),
-      total,
-      userId: user.uid
+      quantity: qty,
+      price: prc,
+      total
     };
 
-    const docRef = await addDoc(collection(db, 'inventory'), newItem);
-    setInventory(prev => [...prev, { ...newItem, id: docRef.id }]);
+    const itemRef = await addDoc(collection(db, 'inventories', user.uid, 'items'), newItem);
+    setInventory(prev => [...prev, { ...newItem, id: itemRef.id }]);
     setItemName('');
     setQuantity('');
     setPrice('');
 
-    await addDoc(collection(db, 'transactions'), {
+    await addDoc(collection(db, 'inventories', user.uid, 'transactions'), {
       type: 'Added',
       name: itemName,
-      quantity: parseInt(quantity),
-      price: parseFloat(price),
+      quantity: qty,
+      price: prc,
       total,
-      timestamp: Timestamp.now(),
-      userId: user.uid
+      timestamp: Timestamp.now()
     });
 
     await loadTransactions(user.uid);
@@ -89,17 +91,16 @@ const Inventory = () => {
     const item = inventory.find(i => i.id === id);
     if (!item || !user) return;
 
-    await deleteDoc(doc(db, 'inventory', id));
+    await deleteDoc(doc(db, 'inventories', user.uid, 'items', id));
     setInventory(prev => prev.filter(i => i.id !== id));
 
-    await addDoc(collection(db, 'transactions'), {
+    await addDoc(collection(db, 'inventories', user.uid, 'transactions'), {
       type: 'Deleted',
       name: item.name,
       quantity: item.quantity,
       price: item.price,
       total: item.total,
-      timestamp: Timestamp.now(),
-      userId: user.uid
+      timestamp: Timestamp.now()
     });
 
     await loadTransactions(user.uid);
@@ -112,7 +113,7 @@ const Inventory = () => {
           ? {
               ...item,
               quantity: Math.max(0, item.quantity + delta),
-              total: (item.quantity + delta) * item.price
+              total: Math.max(0, (item.quantity + delta) * item.price)
             }
           : item
       )
@@ -121,20 +122,19 @@ const Inventory = () => {
 
   const handleSave = async (item) => {
     if (!user) return;
-    const itemRef = doc(db, 'inventory', item.id);
+    const itemRef = doc(db, 'inventories', user.uid, 'items', item.id);
     await updateDoc(itemRef, {
       quantity: item.quantity,
       total: item.total
     });
 
-    await addDoc(collection(db, 'transactions'), {
+    await addDoc(collection(db, 'inventories', user.uid, 'transactions'), {
       type: 'Updated',
       name: item.name,
       quantity: item.quantity,
       price: item.price,
       total: item.total,
-      timestamp: Timestamp.now(),
-      userId: user.uid
+      timestamp: Timestamp.now()
     });
 
     await loadTransactions(user.uid);
@@ -178,6 +178,13 @@ const Inventory = () => {
 
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
 
+  const computedTotal = () => {
+    const qty = parseInt(quantity);
+    const prc = parseFloat(price);
+    if (isNaN(qty) || isNaN(prc)) return 0;
+    return qty * prc;
+  };
+
   return (
     <div className="page-container">
       <div className="glass-card mb-4">
@@ -188,7 +195,11 @@ const Inventory = () => {
           <input className="form-control me-2" type="number" placeholder="Price" value={price} onChange={e => setPrice(e.target.value)} />
           <button className="btn btn-gradient" onClick={addInventoryItem}>Add</button>
         </div>
-
+        {quantity && price && (
+          <div className="mb-3 text-info">
+            <strong>Total: ₹{computedTotal()}</strong>
+          </div>
+        )}
         <table className="table text-white table-bordered table-hover">
           <thead>
             <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th><th>Actions</th></tr>
