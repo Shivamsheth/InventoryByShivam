@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import '../styles/styles.css';
+import { ref } from 'firebase/storage';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -149,3 +150,4 @@ export default function Profile() {
     </div>
   );
 }
+
