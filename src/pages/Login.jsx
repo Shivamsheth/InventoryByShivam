@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase'; // Make sure this path is correct
+import { signInWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
+import { auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import '../styles/styles.css';
 
@@ -9,13 +9,31 @@ export default function Login() {
     const [form, setForm] = useState({ email: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
+    const [showVerifyPrompt, setShowVerifyPrompt] = useState(false);
+    const [emailSent, setEmailSent] = useState(false);
 
     const handleLogin = async () => {
+        setError('');
         try {
-            await signInWithEmailAndPassword(auth, form.email, form.password);
-            navigate('/inventory');
+            const userCredential = await signInWithEmailAndPassword(auth, form.email, form.password);
+            const user = userCredential.user;
+
+            if (user.emailVerified) {
+                navigate('/inventory');
+            } else {
+                setShowVerifyPrompt(true);
+            }
         } catch (err) {
             setError('Invalid email or password');
+        }
+    };
+
+    const handleSendVerification = async () => {
+        try {
+            await sendEmailVerification(auth.currentUser);
+            setEmailSent(true);
+        } catch (err) {
+            setError('Failed to send verification email.');
         }
     };
 
@@ -63,6 +81,19 @@ export default function Login() {
                 <button className="btn btn-gradient w-100 mt-3" onClick={handleLogin}>
                     Login
                 </button>
+
+                {showVerifyPrompt && (
+                    <div className="mt-3 text-center">
+                        <p className="text-warning">Email not verified.</p>
+                        {!emailSent ? (
+                            <button className="btn btn-outline-warning" onClick={handleSendVerification}>
+                                Send Verification Email
+                            </button>
+                        ) : (
+                            <p className="text-success">Verification email sent! Please check your inbox.</p>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );
